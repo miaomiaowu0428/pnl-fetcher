@@ -30,11 +30,16 @@ pub struct TokenPnl {
     pub change_ui: f64,
     pub decimals: u8,
     pub tx_count: usize,
+    /// 该 token 最早一笔交易的时间戳（unix 秒）
+    pub first_tx_ts: Option<u64>,
 }
 
 impl std::fmt::Display for TokenPnl {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:+.6} {} txs {}", self.change_ui, self.tx_count, self.mint)
+        match self.first_tx_ts {
+            Some(ts) => write!(f, "[{}] {:+.6} {} txs {}", ts, self.change_ui, self.tx_count, self.mint),
+            None => write!(f, "[---] {:+.6} {} txs {}", self.change_ui, self.tx_count, self.mint),
+        }
     }
 }
 
@@ -148,8 +153,8 @@ pub async fn compute_pnl(
 
     info!("fetched {} signatures (scanning ...)", signatures.len());
 
-    // 聚合：base_mint -> (quote_change_sum, quote_decimals, tx_count, quote_mint_str)
-    let mut agg: HashMap<String, (i128, u8, usize, String)> = HashMap::new();
+    // 聚合：base_mint -> (quote_change_sum, quote_decimals, tx_count, quote_mint_str, first_tx_ts)
+    let mut agg: HashMap<String, (i128, u8, usize, String, Option<u64>)> = HashMap::new();
     let mut scanned = 0usize;
     let mut matched_txs = 0usize;
 
@@ -178,8 +183,8 @@ pub async fn compute_pnl(
         };
 
         // 上界过滤：block_time 必须在 [start_ts, end_ts] 内（无 block_time 的保留）
-        if let Some(bt) = tx.block_time {
-            let bt = bt as u64;
+        let tx_ts: Option<u64> = tx.block_time.map(|bt| bt.max(0) as u64);
+        if let Some(bt) = tx_ts {
             if bt < start_ts || bt > end_ts {
                 continue;
             }
@@ -295,17 +300,21 @@ pub async fn compute_pnl(
         let quote_mint_str = normalized_selected_quote.to_string();
         let entry = agg
             .entry(base_mint.to_string())
-            .or_insert((0i128, quote_decimals(&quote_mint_str) as u8, 0usize, quote_mint_str.clone()));
+            .or_insert((0i128, quote_decimals(&quote_mint_str) as u8, 0usize, quote_mint_str.clone(), None));
         entry.0 += selected_quote_change;
         entry.1 = quote_decimals(&quote_mint_str) as u8;
         entry.2 += 1;
         entry.3 = quote_mint_str;
+        // 记录最早一笔交易时间
+        if let Some(ts) = tx_ts {
+            entry.4 = Some(entry.4.map_or(ts, |earliest| earliest.min(ts)));
+        }
 
         matched_txs += 1;
     }
 
     let mut pnl_vec = Vec::with_capacity(agg.len());
-    for (mint, (change, dec, cnt, quote_mint)) in agg.iter() {
+    for (mint, (change, dec, cnt, quote_mint, first_ts)) in agg.iter() {
         let ui = (*change as f64) / 10f64.powi(*dec as i32);
         pnl_vec.push(TokenPnl {
             mint: format!("{} (quote={})", mint, quote_mint),
@@ -313,8 +322,12 @@ pub async fn compute_pnl(
             change_ui: ui,
             decimals: *dec,
             tx_count: *cnt,
+            first_tx_ts: *first_ts,
         });
     }
+
+    // 按时序排序：以每个 token 最早一笔交易时间为准（无时间的排最后）
+    pnl_vec.sort_by_key(|t| t.first_tx_ts.unwrap_or(u64::MAX));
 
     Ok(PnlReport {
         scanned,
