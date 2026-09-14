@@ -1,0 +1,5 @@
+/target
+/tx_cache_db
+*.log
+.env
+/Cargo.lock

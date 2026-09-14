@@ -4,11 +4,13 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-solana-sdk = "3"
+solana-sdk = "4.0.1"
 tokio = "1.49.0"
-transaction-cache = { git = "https://github.com/miaomiaowu0428/transaction-cache.git" }
-utils = { git = "https://github.com/miaomiaowu0428/sol-utils.git" }
+transaction-cache = { git = "https://github.com/miaomiaowu0428/transaction-cache.git", branch = "supportV1" }
+utils = { git = "https://github.com/miaomiaowu0428/sol-utils.git", branch = "supportV1" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 log = "0.4.29"
 dotenvy = "0.15.7"
+
+[workspace]
